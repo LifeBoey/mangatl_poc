@@ -1,4 +1,4 @@
-import { fetchChapterPage } from "@/lib/mangadex";
+import { errorResponse, fetchChapterPage } from "@/lib/mangadex";
 
 export const maxDuration = 60;
 
@@ -58,17 +58,21 @@ export async function POST(req: Request) {
       data = Buffer.from(img.buf).toString("base64");
       mimeType = img.type;
     } catch (e) {
-      return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+      return errorResponse(e); // 403 for explicit titles
     }
   }
   if (!data) return Response.json({ error: "no image" }, { status: 400 });
 
   // Free-tier models get overloaded / hit quota often: fall through a list until one answers.
   const models = [...new Set([model, ...FALLBACK_MODELS])];
-  let res: Response | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let json: any = null;
+  let ok = false;
+  let sawQuota = false; // any model said 429 -> the user-facing problem is quota
+  let lastStatus = 502;
+  let lastMsg = "Could not reach Gemini";
   for (const m of models) {
+    let res: Response;
     try {
       res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
         method: "POST",
@@ -78,24 +82,29 @@ export async function POST(req: Request) {
           generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA },
         }),
       });
-      json = await res.json().catch(() => null);
     } catch {
-      res = null; // network error: try the next model
-      continue;
+      continue; // network error: try the next model
     }
-    if (res.ok || ![404, 429, 500, 503].includes(res.status)) break;
+    json = await res.json().catch(() => null);
+    if (res.ok) { ok = true; break; }
+    lastStatus = res.status;
+    lastMsg = json?.error?.message ?? `Gemini error ${res.status}`;
+    if (res.status === 429) sawQuota = true;
+    if (![404, 429, 500, 503].includes(res.status)) break; // e.g. bad key: other models won't help
   }
-  if (!res || !res.ok) {
-    res = res ?? new Response(null, { status: 502 });
-    const msg = json?.error?.message ?? `Gemini error ${res.status}`;
-    const quota = res.status === 429;
-    return Response.json(
-      { error: quota ? "Free Gemini quota used up for now — wait a minute or try tomorrow." : msg },
-      { status: res.status },
-    );
+  if (!ok) {
+    return sawQuota
+      ? Response.json({ error: "Free Gemini quota used up for now — wait a minute or try tomorrow." }, { status: 429 })
+      : Response.json({ error: lastMsg }, { status: lastStatus });
   }
-  const text: string =
-    json.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "[]";
+  // A 200 with no candidate (e.g. safety block) is an error, not "no text" — otherwise the client
+  // would cache an empty page forever.
+  const cand = json?.candidates?.[0];
+  if (!cand?.content?.parts) {
+    const why = json?.promptFeedback?.blockReason ?? cand?.finishReason ?? "empty response";
+    return Response.json({ error: `Gemini returned no translation (${why})` }, { status: 502 });
+  }
+  const text: string = cand.content.parts.map((p: { text?: string }) => p.text ?? "").join("");
   try {
     const parsed = JSON.parse(text);
     return Response.json({ bubbles: Array.isArray(parsed) ? parsed.flatMap(clean) : [] });

@@ -13,8 +13,6 @@ export default function Home() {
   const [results, setResults] = useState<Result[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [hidePorn, setHidePorn] = useState(true); // filter on by default
-
   async function go(e: React.FormEvent) {
     e.preventDefault();
     const text = q.trim();
@@ -26,7 +24,7 @@ export default function Home() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(text)}${hidePorn ? "" : "&porn=1"}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(text)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setResults(json);
@@ -48,10 +46,7 @@ export default function Home() {
       <form onSubmit={go}>
         <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Frieren, or https://mangadex.org/title/…" autoFocus />
       </form>
-      <label className="muted" style={{ display: "block", marginTop: 8 }}>
-        <input type="checkbox" checked={hidePorn} onChange={(e) => setHidePorn(e.target.checked)} /> Hide pornographic
-        content
-      </label>
+      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Explicit titles are always hidden.</p>
       {loading && <p className="muted">Searching…</p>}
       {error && <p className="error">{error}</p>}
       {results && results.length === 0 && <p className="muted">No results.</p>}

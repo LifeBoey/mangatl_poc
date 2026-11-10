@@ -25,6 +25,35 @@ function saveCache(key: string | undefined, b: Bubble[]) {
   } catch {}
 }
 
+// One request per page at a time, shared between callers. React dev mode runs effects twice;
+// without this each page would be sent to Gemini twice and spend free quota.
+const inflight = new Map<string, Promise<Bubble[] | null>>();
+
+function translateOnce(p: ReaderPage): Promise<Bubble[] | null> {
+  const key = p.cacheKey ?? p.src;
+  const existing = inflight.get(key);
+  if (existing) return existing;
+  // Deliberately not cancellable: another caller may be waiting on the same shared request.
+  const run = (async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(p.request),
+      });
+      const j = await res.json().catch(() => ({ error: `Server error ${res.status}` }));
+      if (res.status === 429 && attempt < 2) { await new Promise((r) => setTimeout(r, 20000)); continue; }
+      if (!res.ok) throw new Error(j.error);
+      saveCache(p.cacheKey, j.bubbles);
+      return j.bubbles as Bubble[];
+    }
+    return null;
+  })();
+  inflight.set(key, run);
+  run.finally(() => inflight.delete(key)).catch(() => {});
+  return run;
+}
+
 export default function Reader({ pages, translate }: { pages: ReaderPage[]; translate: boolean }) {
   const [states, setStates] = useState<State[]>([]);
 
@@ -41,23 +70,11 @@ export default function Reader({ pages, translate }: { pages: ReaderPage[]; tran
         if (cached) { set({ status: "done", bubbles: cached }); continue; }
         if (!p.request) continue;
         set({ status: "working" });
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const res = await fetch("/api/translate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(p.request),
-            });
-            const j = await res.json();
-            if (res.status === 429 && attempt < 2) { await new Promise((r) => setTimeout(r, 20000)); continue; }
-            if (!res.ok) throw new Error(j.error);
-            saveCache(p.cacheKey, j.bubbles);
-            set({ status: "done", bubbles: j.bubbles });
-            break;
-          } catch (e) {
-            set({ status: "error", error: String(e instanceof Error ? e.message : e) });
-            break;
-          }
+        try {
+          const bubbles = await translateOnce(p);
+          if (bubbles) set({ status: "done", bubbles });
+        } catch (e) {
+          set({ status: "error", error: String(e instanceof Error ? e.message : e) });
         }
       }
     })();
@@ -141,15 +158,29 @@ function FitBubble(props: {
     if (!el || !span || !el.clientWidth || !el.clientHeight) return;
     // The span is a flex item, so it grows to at least its longest word; compare it to the box.
     const fits = () => span.offsetWidth <= el.clientWidth && span.offsetHeight <= el.clientHeight;
+    // Reset anything a previous fit changed.
     el.style.overflowWrap = "normal";
+    el.style.height = String(props.style.height ?? "");
+    el.style.minHeight = "";
     let size = 22;
     el.style.fontSize = `${size}px`;
     while (size > 7 && !fits()) {
       size -= 1;
       el.style.fontSize = `${size}px`;
     }
-    // Last resort for a tiny box: allow breaking inside words rather than hiding letters.
-    if (!fits()) el.style.overflowWrap = "anywhere";
+    if (fits()) return;
+    // Tiny box: allow breaking inside words and shrink a little more...
+    el.style.overflowWrap = "anywhere";
+    while (size > 5 && !fits()) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+    }
+    // ...and if it still doesn't fit, let the box grow downwards rather than cut off lines.
+    if (!fits()) {
+      el.style.minHeight = String(props.style.height ?? "");
+      el.style.height = "auto";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.text, props.refit]);
   return (
     <div ref={ref} className={`bubble${props.orig ? " orig" : ""}`} title={props.ja} onClick={props.onClick} style={props.style}>

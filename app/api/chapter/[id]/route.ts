@@ -1,9 +1,9 @@
-import { getChapterInfo, getPageUrls } from "@/lib/mangadex";
+import { errorResponse, getChapterInfo, getPageUrls } from "@/lib/mangadex";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
-    const info = await getChapterInfo(id);
+    const info = await getChapterInfo(id); // throws for explicit titles
     const pages = info.externalUrl ? [] : await getPageUrls(id);
     return Response.json({
       ...info,
@@ -11,6 +11,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       pages: pages.map((_u, i) => `/api/page/${id}/${i}`),
     });
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 502 });
+    return errorResponse(e);
   }
 }

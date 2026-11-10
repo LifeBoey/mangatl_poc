@@ -3,9 +3,44 @@
 import { SOURCE_LANGS } from "./langs";
 
 const API = "https://api.mangadex.org";
-export const UA = "MangaTL-course-demo/0.1 (+https://github.com)";
+export const UA = "MangaTL-course-demo/0.1 (non-commercial course project)";
 
-const ALL_RATINGS = ["safe", "suggestive", "erotica", "pornographic"];
+// Explicit content (erotica, pornographic) is always hidden: it's excluded from every MangaDex
+// query, and any manga/chapter/cover opened directly by id is checked before it's served.
+const ALLOWED_RATINGS = ["safe", "suggestive"];
+
+export class HiddenContentError extends Error {
+  constructor() {
+    super("This title is explicit and is hidden in this app.");
+  }
+}
+
+// Turn an error into an API response: 403 for hidden content, 502 for MangaDex/network trouble.
+export function errorResponse(e: unknown) {
+  const hidden = e instanceof HiddenContentError;
+  return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: hidden ? 403 : 502 });
+}
+
+// Rating checks are cached for an hour, so a title MangaDex re-rates as explicit is hidden soon after.
+const RATING_TTL = 60 * 60 * 1000;
+const mangaRatingCache = new Map<string, { rating: string; at: number }>();
+const allowedChapters = new Map<string, number>(); // chapterId -> when its manga passed the check
+
+function isChapterAllowed(chapterId: string) {
+  const at = allowedChapters.get(chapterId);
+  return at !== undefined && Date.now() - at < RATING_TTL;
+}
+
+async function assertMangaAllowed(mangaId: string, knownRating?: string) {
+  const cached = mangaRatingCache.get(mangaId);
+  let rating = knownRating ?? (cached && Date.now() - cached.at < RATING_TTL ? cached.rating : undefined);
+  if (!rating) {
+    const json = await md(`/manga/${mangaId}`, {});
+    rating = json.data.attributes.contentRating as string;
+  }
+  mangaRatingCache.set(mangaId, { rating, at: Date.now() });
+  if (!ALLOWED_RATINGS.includes(rating)) throw new HiddenContentError();
+}
 
 async function md(path: string, params: Record<string, string | string[]> = {}) {
   const qs = new URLSearchParams();
@@ -28,12 +63,12 @@ function pickTitle(attr: Any): string {
   return t.en ?? t["ja-ro"] ?? t.ja ?? Object.values(t)[0] ?? "Untitled";
 }
 
-export async function searchManga(q: string, includePorn = false) {
+export async function searchManga(q: string) {
   const json = await md("/manga", {
     title: q,
     limit: "24",
     "includes[]": "cover_art",
-    "contentRating[]": includePorn ? ALL_RATINGS : ALL_RATINGS.filter((r) => r !== "pornographic"),
+    "contentRating[]": ALLOWED_RATINGS,
     "order[relevance]": "desc",
   });
   return json.data.map((m: Any) => {
@@ -54,6 +89,7 @@ export async function searchManga(q: string, includePorn = false) {
 
 export async function getManga(id: string) {
   const json = await md(`/manga/${id}`, {});
+  await assertMangaAllowed(id, json.data.attributes.contentRating);
   return { id, title: pickTitle(json.data.attributes) };
 }
 
@@ -75,7 +111,7 @@ export async function getChapters(mangaId: string): Promise<ChapterRow[]> {
   for (let offset = 0; offset < 4000; offset += 500) {
     const json = await md(`/manga/${mangaId}/feed`, {
       "translatedLanguage[]": ["en", ...SOURCE_LANGS],
-      "contentRating[]": ALL_RATINGS,
+      "contentRating[]": ALLOWED_RATINGS,
       "includes[]": "scanlation_group",
       "order[chapter]": "asc",
       limit: "500",
@@ -112,6 +148,9 @@ export async function getChapterInfo(chapterId: string) {
   const json = await md(`/chapter/${chapterId}`, { "includes[]": ["scanlation_group", "manga"] });
   const c = json.data;
   const manga = c.relationships.find((r: Any) => r.type === "manga");
+  if (!manga) throw new Error("chapter has no manga");
+  await assertMangaAllowed(manga.id, manga.attributes?.contentRating);
+  allowedChapters.set(chapterId, Date.now());
   return {
     id: c.id,
     number: c.attributes.chapter,
@@ -130,15 +169,32 @@ export async function getChapterInfo(chapterId: string) {
 // so cache them for 10 min and refresh on demand.
 const pageCache = new Map<string, { urls: string[]; at: number }>();
 const PAGE_TTL = 10 * 60 * 1000;
+const MIN_REFRESH_GAP = 60 * 1000; // don't re-ask /at-home more than once a minute per chapter
+const inflight = new Map<string, Promise<string[]>>(); // de-dupe concurrent lookups
 
 export async function getPageUrls(chapterId: string, fresh = false): Promise<string[]> {
   const hit = pageCache.get(chapterId);
-  if (!fresh && hit && Date.now() - hit.at < PAGE_TTL) return hit.urls;
-  const json = await md(`/at-home/server/${chapterId}`, {});
-  const { baseUrl, chapter } = json;
-  const urls = chapter.data.map((f: string) => `${baseUrl}/data/${chapter.hash}/${f}`);
-  pageCache.set(chapterId, { urls, at: Date.now() });
-  return urls;
+  const age = hit ? Date.now() - hit.at : Infinity;
+  // A "fresh" request only refreshes if the cached URLs are older than a minute, so one dead
+  // @Home node on a 30-page chapter can't trigger 30 /at-home calls (limit is 40/min).
+  if (hit && age < PAGE_TTL && (!fresh || age < MIN_REFRESH_GAP)) return hit.urls;
+  const pending = inflight.get(chapterId);
+  if (pending) return pending;
+  const p = (async () => {
+    // Page images and translation reach here by chapter id alone, so check the rating first.
+    if (!isChapterAllowed(chapterId)) await getChapterInfo(chapterId);
+    const json = await md(`/at-home/server/${chapterId}`, {});
+    const { baseUrl, chapter } = json;
+    const urls: string[] = chapter.data.map((f: string) => `${baseUrl}/data/${chapter.hash}/${f}`);
+    pageCache.set(chapterId, { urls, at: Date.now() });
+    return urls;
+  })();
+  inflight.set(chapterId, p);
+  try {
+    return await p;
+  } finally {
+    inflight.delete(chapterId);
+  }
 }
 
 // Fetch page i of a chapter; if the cached at-home URL has gone stale, refresh it once.
@@ -154,15 +210,23 @@ export async function fetchChapterPage(chapterId: string, i: number) {
   throw new Error("could not fetch page image from MangaDex");
 }
 
-// Only proxy MangaDex image hosts (avoid being an open proxy).
-export function isMangadexImage(url: string) {
+// The generic image proxy only serves cover art (pages go through fetchChapterPage).
+// Returns the manga id from a https://uploads.mangadex.org/covers/{mangaId}/{file} URL, or null.
+export function coverMangaId(url: string): string | null {
   try {
     const u = new URL(url);
-    const h = u.hostname;
-    return u.protocol === "https:" && (h.endsWith(".mangadex.network") || h === "mangadex.org" || h.endsWith(".mangadex.org"));
+    const m = u.pathname.match(/^\/covers\/([0-9a-f-]{36})\/[^/]+$/i);
+    return u.protocol === "https:" && u.hostname === "uploads.mangadex.org" && m ? m[1] : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function fetchCover(url: string) {
+  const mangaId = coverMangaId(url);
+  if (!mangaId) throw new Error("not a MangaDex cover url");
+  await assertMangaAllowed(mangaId);
+  return fetchMangadexImage(url);
 }
 
 // Fetch an image from the MangaDex@Home network and report the result, as MangaDex requires.

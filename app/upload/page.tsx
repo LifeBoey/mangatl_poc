@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import Reader, { type ReaderPage } from "@/components/Reader";
 
 const MAX_SIDE = 1800; // keep requests well under Vercel's 4.5 MB body limit
+const MAX_PAGES = 30;
+
+async function sha256(text: string) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 async function shrink(file: File): Promise<{ data: string; mimeType: string; url: string }> {
   const bmp = await createImageBitmap(file);
@@ -21,10 +27,13 @@ export default function Upload() {
   const [busy, setBusy] = useState(false);
   const [skipped, setSkipped] = useState<string[]>([]);
 
-  async function addFiles(files: File[]) {
-    const imgs = files.filter((f) => f.type.startsWith("image/")).slice(0, 30);
+  // Dropped/picked files replace the current pages; pasted screenshots are added to the end.
+  async function addFiles(files: File[], append = false) {
+    const imgs = files
+      .filter((f) => f.type.startsWith("image/"))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .slice(0, MAX_PAGES); // sort first, so 40 files keep pages 1-30, not a random 30
     if (!imgs.length) return;
-    imgs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     setBusy(true);
     setSkipped([]);
     const out: ReaderPage[] = [];
@@ -32,13 +41,15 @@ export default function Upload() {
     for (const f of imgs) {
       try {
         const s = await shrink(f);
-        out.push({ src: s.url, request: { data: s.data, mimeType: s.mimeType } });
+        // Cache by image content, so re-uploading the same page doesn't spend quota again.
+        const cacheKey = `mangatl:upload:${await sha256(s.data)}`;
+        out.push({ src: s.url, request: { data: s.data, mimeType: s.mimeType }, cacheKey });
       } catch {
         bad.push(f.name); // e.g. HEIC, which most browsers can't decode
       }
     }
     setSkipped(bad);
-    if (out.length) setPages(out);
+    if (out.length) setPages((prev) => (append ? [...prev, ...out].slice(0, MAX_PAGES) : out));
     setBusy(false);
   }
 
@@ -46,7 +57,7 @@ export default function Upload() {
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
-      if (files.length) addFiles(files);
+      if (files.length) addFiles(files, true);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
