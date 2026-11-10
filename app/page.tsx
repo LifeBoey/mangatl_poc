@@ -39,10 +39,11 @@ export default function Home() {
 
   return (
     <>
-      <h1>Read Japanese manga in English</h1>
+      <h1>Read Japanese, Spanish &amp; Portuguese manga in English</h1>
       <p className="muted">
-        Search a series by name or paste a MangaDex link. If an English chapter exists we show it; if only Japanese
-        exists we machine-translate it; if neither, <Link href="/upload">upload your own Japanese pages</Link>.
+        Search a series by name or paste a MangaDex link. If an English chapter exists we show it; if only a Japanese,
+        Spanish or Portuguese one exists we machine-translate it; if neither,{" "}
+        <Link href="/upload">upload your own pages</Link>.
       </p>
       <form onSubmit={go}>
         <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Frieren, or https://mangadex.org/title/…" autoFocus />
@@ -61,8 +62,10 @@ export default function Home() {
             <div>
               <b>{m.title}</b> {m.year ? `(${m.year})` : ""}
               <br />
-              {m.langs.includes("ja") && <span className="tag ja">JA</span>}
               {m.langs.includes("en") && <span className="tag en">EN</span>}
+              {m.langs.includes("ja") && <span className="tag ja">JA</span>}
+              {m.langs.some((l) => l.startsWith("es")) && <span className="tag ja">ES</span>}
+              {m.langs.some((l) => l.startsWith("pt")) && <span className="tag ja">PT</span>}
               {m.rating !== "safe" && <span className="tag">{m.rating}</span>}
             </div>
           </Link>

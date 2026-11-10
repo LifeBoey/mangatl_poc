@@ -56,7 +56,7 @@ export default function Upload() {
     <>
       <h1>Translate your own pages</h1>
       <p className="muted">
-        Drop Japanese manga pages here (up to 30, ordered by filename), pick files, or paste a screenshot with
+        Drop Japanese, Spanish or Portuguese manga pages here (up to 30, ordered by filename), pick files, or paste a screenshot with
         Ctrl+V. Images are only sent to Gemini for translation and aren&apos;t stored.
       </p>
       <label

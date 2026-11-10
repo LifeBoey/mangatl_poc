@@ -50,7 +50,7 @@ export default function ReadPage() {
       <p className="muted">
         Scanlation: {ch.groups.length ? ch.groups.join(", ") : "unknown / no group"} · via{" "}
         <a href={`https://mangadex.org/chapter/${id}`} target="_blank">MangaDex</a>
-        {needsTranslation && " · Click a box to peek at the original Japanese."}
+        {needsTranslation && " · Click a box to peek at the original."}
       </p>
       {ch.externalUrl && (
         <p>This chapter is hosted externally: <a href={ch.externalUrl} target="_blank">{ch.externalUrl}</a></p>

@@ -1,9 +1,9 @@
-# MangaTL — read Japanese manga in English
+# MangaTL — read Japanese, Spanish & Portuguese manga in English
 
 Proof-of-concept for a course challenge. Search a manga on MangaDex (or paste a MangaDex link):
 
 - If an **English** chapter exists on MangaDex, read it (human scanlation).
-- If only **Japanese** exists, each page is sent to **Google Gemini** (free tier), which returns the speech-bubble
+- If only **Japanese, Spanish (es / es-la) or Portuguese (pt / pt-br)** exists, each page is sent to **Google Gemini** (free tier), which returns the speech-bubble
   boxes + English text, drawn as white boxes over the bubbles. Click a box to see the art/original underneath.
 - If there's nothing readable, **upload your own Japanese pages** (drag-drop, file picker, or Ctrl+V a screenshot).
 
@@ -11,6 +11,7 @@ Translations are cached in your browser (localStorage), so re-opening a chapter 
 
 > Reality check: MangaDex hosts very few Japanese raws (~35 titles). Good demo title: **Dragon Tofu**
 > (has both Japanese and English chapters, so you can compare machine vs human translation).
+> For Spanish, try **Spacedrum** (Spanish + English on every chapter).
 
 ## 1. Get a free Gemini API key (no card)
 

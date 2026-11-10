@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export const metadata = {
   title: "MangaTL",
-  description: "Read Japanese manga in English — MangaDex + Gemini proof of concept",
+  description: "Read Japanese, Spanish and Portuguese manga in English — MangaDex + Gemini proof of concept",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

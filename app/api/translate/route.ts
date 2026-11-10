@@ -4,12 +4,12 @@ export const maxDuration = 60;
 
 const FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"];
 
-const PROMPT = `This is a manga/comic page. Find every piece of Japanese text (speech bubbles, captions, narration, signs; skip tiny sound effects if unsure).
+const PROMPT = `This is a manga/comic page whose text is in Japanese, Spanish or Portuguese. Find every piece of text (speech bubbles, captions, narration, signs; skip tiny sound effects if unsure).
 For each one return:
 - box_2d: [ymin, xmin, ymax, xmax] of the text region, normalised to 0-1000
-- ja: the original Japanese text
+- original: the original text exactly as written
 - en: a natural, concise English translation suitable for a comic speech bubble
-Return them in reading order (right-to-left, top-to-bottom). Return [] if there is no text.`;
+Return them in reading order (right-to-left, top-to-bottom for Japanese; left-to-right, top-to-bottom otherwise). Return [] if there is no text.`;
 
 const SCHEMA = {
   type: "ARRAY",
@@ -17,15 +17,17 @@ const SCHEMA = {
     type: "OBJECT",
     properties: {
       box_2d: { type: "ARRAY", items: { type: "INTEGER" } },
-      ja: { type: "STRING" },
+      original: { type: "STRING" },
       en: { type: "STRING" },
     },
-    required: ["box_2d", "ja", "en"],
+    required: ["box_2d", "original", "en"],
   },
 };
 
 // Drop malformed boxes, clamp to 0-1000 and make sure min < max (models sometimes swap them).
-function clean(b: { box_2d?: unknown; ja?: unknown; en?: unknown }) {
+// The client keeps the original text in `ja` (older cached pages use that name), whatever the language.
+function clean(b: { box_2d?: unknown; original?: unknown; ja?: unknown; en?: unknown }) {
+  const orig = typeof b.original === "string" ? b.original : typeof b.ja === "string" ? b.ja : "";
   const box = b.box_2d;
   if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => Number.isFinite(n))) return [];
   if (typeof b.en !== "string" || !b.en.trim()) return [];
@@ -34,7 +36,7 @@ function clean(b: { box_2d?: unknown; ja?: unknown; en?: unknown }) {
   const [ymin, ymax] = a <= d ? [a, d] : [d, a];
   const [xmin, xmax] = x <= y ? [x, y] : [y, x];
   if (ymax - ymin < 5 || xmax - xmin < 5) return [];
-  return [{ box_2d: [ymin, xmin, ymax, xmax], ja: typeof b.ja === "string" ? b.ja : "", en: b.en.trim() }];
+  return [{ box_2d: [ymin, xmin, ymax, xmax], ja: orig, en: b.en.trim() }];
 }
 
 export async function POST(req: Request) {

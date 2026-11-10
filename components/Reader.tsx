@@ -102,6 +102,7 @@ function Page({ src, state, index }: { src: string; state?: State; index: number
       />
       {state?.bubbles?.map((b, k) => {
         // Japanese text is vertical (tall, narrow boxes); widen + pad around the centre so English fits.
+        // Spanish/Portuguese boxes are already wide, so this mostly just adds padding for them.
         const [y0, x0, y1, x1] = b.box_2d;
         const cx = (x0 + x1) / 2;
         const half = Math.max((x1 - x0) / 2 + 15, 70);

@@ -1,5 +1,7 @@
 // Server-side MangaDex client. MangaDex requires a real User-Agent and no CORS from browsers,
 // so everything goes through our API routes.
+import { SOURCE_LANGS } from "./langs";
+
 const API = "https://api.mangadex.org";
 export const UA = "MangaTL-course-demo/0.1 (+https://github.com)";
 
@@ -57,8 +59,8 @@ export async function getManga(id: string) {
 
 export type ChapterRow = {
   number: string;
-  en: ChapterRef | null;
-  ja: ChapterRef | null;
+  // Best chapter per language code ("en", "ja", "es", "es-la", "pt", "pt-br").
+  byLang: Record<string, ChapterRef>;
 };
 export type ChapterRef = {
   id: string;
@@ -70,9 +72,9 @@ export type ChapterRef = {
 
 export async function getChapters(mangaId: string): Promise<ChapterRow[]> {
   const all: Any[] = [];
-  for (let offset = 0; offset < 2000; offset += 500) {
+  for (let offset = 0; offset < 4000; offset += 500) {
     const json = await md(`/manga/${mangaId}/feed`, {
-      "translatedLanguage[]": ["ja", "en"],
+      "translatedLanguage[]": ["en", ...SOURCE_LANGS],
       "contentRating[]": ALL_RATINGS,
       "includes[]": "scanlation_group",
       "order[chapter]": "asc",
@@ -96,11 +98,11 @@ export async function getChapters(mangaId: string): Promise<ChapterRow[]> {
         .map((r: Any) => r.attributes?.name)
         .filter(Boolean),
     };
-    const row = rows.get(num) ?? { number: num, en: null, ja: null };
-    const lang = a.translatedLanguage as "en" | "ja";
-    const existing = row[lang];
+    const row: ChapterRow = rows.get(num) ?? { number: num, byLang: {} };
+    const lang: string = a.translatedLanguage;
+    const existing = row.byLang[lang];
     // Prefer a chapter that actually has hosted pages.
-    if (!existing || (existing.pages === 0 && ref.pages > 0)) row[lang] = ref;
+    if (!existing || (existing.pages === 0 && ref.pages > 0)) row.byLang[lang] = ref;
     rows.set(num, row);
   }
   return [...rows.values()];
