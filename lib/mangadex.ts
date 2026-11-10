@@ -26,12 +26,12 @@ function pickTitle(attr: Any): string {
   return t.en ?? t["ja-ro"] ?? t.ja ?? Object.values(t)[0] ?? "Untitled";
 }
 
-export async function searchManga(q: string) {
+export async function searchManga(q: string, includePorn = false) {
   const json = await md("/manga", {
     title: q,
     limit: "24",
     "includes[]": "cover_art",
-    "contentRating[]": ALL_RATINGS,
+    "contentRating[]": includePorn ? ALL_RATINGS : ALL_RATINGS.filter((r) => r !== "pornographic"),
     "order[relevance]": "desc",
   });
   return json.data.map((m: Any) => {
