@@ -1,5 +1,8 @@
 # MangaTL — read Japanese, Spanish & Portuguese manga in English
 
+**Live:** https://mangatlpoc-nine.vercel.app/ (also via https://lifeboey.github.io/mangatl_poc/, which redirects
+there — GitHub Pages can't run the app's server code, so `docs/index.html` just forwards to Vercel).
+
 Proof-of-concept for a course challenge. Search a manga on MangaDex (or paste a MangaDex link):
 
 - If an **English** chapter exists on MangaDex, read it (human scanlation).
